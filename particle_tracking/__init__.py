@@ -16,7 +16,9 @@ import pims
 from detect_blobs import detectCirclesVideo
 from calculateVelocity import findVelocities, alternative_delete_short_trajectories, alternative_calculate_velocities
 from utils import createCircularROI, reorder_rename_dataFrame, reset_track_indexes, present_in_folder, createRectangularROI
-
+import time
+from detect_angular_velocity import detect_angular_velocity
+from calculate_angular_velocity import calculate_angular_velocity
 
 # =============================================================================
 # folder = 'D:/serieDensidad 24-07-2019/'
@@ -33,13 +35,18 @@ def detect_particles_and_save_data(folder, file):
     shape = vid.frame_shape
     date = str(vid.frame_time_stamps[0][0])
     exposure = int(1000000*vid.all_exposures[0]) #in microseconds
-    n_frames = vid.image_count
+    n_frames = (vid.image_count)
+    # n_frames = 1000
     recording_time = n_frames/fps
 # =============================================================================
 #         N = int(file.split('_')[-1].split('.')[0].split('n')[-1]) # Metodo guarrero y temporal
 # =============================================================================
-    N = int(file.split('_')[-3].split('N')[-1]) # Metodo guarrero y temporal
-    power = int(file.split('_')[-2].split('p')[-1]) # Metodo guarrero y temporal
+    # print(file)
+    # N = int(file.split('_')[-3].split('N')[-1]) # Metodo guarrero y temporal
+    # power = int(file.split('_')[-2].split('p')[-1]) # Metodo guarrero y temporal
+    
+    N = 10
+    power = 20
     if power>=100:
         power /= 10
 
@@ -189,20 +196,32 @@ def detect_particles_and_save_data(folder, file):
     roi_data.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_data.pkl'), compression='xz')
     roi_traj.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_trajectories.pkl'), compression='xz')
     roi_vels.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_velocities.pkl'), compression='xz')
-
+    
+    # Detect maximums and minimums
+    detect_angular_velocity(experiment_id,folder)
+    # Calculate angular velocity from comparing the extremes with the previous frame
+    calculate_angular_velocity(experiment_id,folder)
 
 
 if __name__ == "__main__":
 
-    folder = 'D:/'
+    start_time=time.time()
+    folder = 'D;/'
 
     files = glob.glob(folder + '*Aspas*.cine') # List with all .cine files
-
     func = partial(detect_particles_and_save_data, folder) # Partial function that only accept a file
-
-    pool = Pool(processes=2)
+    # detect_particles_and_save_data(folder, files[0])
+    pool = Pool(processes=1)
     pool.map(func, files)
     pool.close()
     pool.join()
-
-    #for file in files:
+    
+    
+    trajectory_file = glob.glob(folder + '*_raw_trajectories.pkl')
+    experiment_id = trajectory_file[0].split('_raw_trajectories.pkl')[0]
+    
+    detect_angular_velocity(experiment_id,folder)
+    calculate_angular_velocity(experiment_id, folder)
+    
+    print('Execution time: %f seconds' % (time.time() - start_time))  
+    
