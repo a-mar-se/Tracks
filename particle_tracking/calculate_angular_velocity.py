@@ -12,11 +12,9 @@ import matplotlib.pyplot as plt
 import os
 
 
-# if __name__ == "__main__":
 def calculate_angular_velocity(experiment_id,folder):
     GRADOS_POR_ASPA = 360./14
-    # experiment_id = 'ec8ee07706d1eb0c5bbd80870d8ce1a6'
-    data_file = os.path.join(folder, str(experiment_id)+'_extremos.pkl')
+    data_file = os.path.join(folder, str(experiment_id)+'_extremos_ale.pkl')
     df = pd.read_pickle(data_file, compression='xz')
     df['indice'] = df.index
         
@@ -188,36 +186,15 @@ def calculate_angular_velocity(experiment_id,folder):
                 angles_column.append(real_angle)
                 
                 if cambio_dip_now == True or cambio_dip_past == True or cambio_pic_now == True or cambio_pic_past == True:
-                    # print("\nSalto de índice!")
-                    # print(picos_now)
-                    # print(picos_past)
-                    # print(avg_pic_angles)
-                    # print(real_pic_angles)
-                    # print(cambio_pics_now)
-                    # print(pos_cambio_pic_now)
-                    # print(cambio_pics_past)
-                    # print(pos_cambio_pic_past)
-                    # print(frame)
-                    # print(t)
-                    # print('\n')
-                    # print(dips_now)
-                    # print(dips_past)
-                    # print(avg_dip_angles)
-                    # print(real_dip_angles)
-                    # print(cambio_dips_now)
-                    # print(pos_cambio_dip_now)
-                    # print(cambio_dips_past)
-                    # print(pos_cambio_dip_past)
-                    # print(frame)
-                    # print(t)
                     saltos +=1
                 if real_angle < 0:
                     
                     negative_values+=1
                 
             else: 
+                # Only for the first frame, the velocity is copied from the second frame
                 angles_column.append(np.nan) 
-        # print(angles_column)
+                
         if len(angles_column)>=2:
             angles_column[0]=angles_column[1]
         
@@ -225,18 +202,16 @@ def calculate_angular_velocity(experiment_id,folder):
         subs.append(sub)
         
     new_df= pd.concat(subs, axis=0)
-    # folder = 'D:/'
-    new_df.to_pickle(os.path.join(folder, str(experiment_id)+'_angles.pkl'), compression='xz')
+    new_df.to_pickle(os.path.join(folder, str(experiment_id)+'_angles_ale.pkl'), compression='xz')
 
     print(f'Negative angles: {negative_values}')
     print(f'Saltos: {saltos}')
     
     anglesss = (new_df['angles'])
     cleanedList = [x for x in anglesss if str(x) != 'nan']
-    plt.hist(cleanedList, bins=125)
-    plt.savefig(os.path.join(folder, str(experiment_id)+'.png'))
-    plt.plot()
-    plt.show()
-
-    df.to_pickle(os.path.join(folder, str(experiment_id)+'_giros.pkl'), compression='xz')
+    df.to_pickle(os.path.join(folder, str(experiment_id)+'_giros_ale.pkl'), compression='xz')
     
+    plt.hist(cleanedList, bins=125)
+    plt.savefig(os.path.join(folder, str(experiment_id)+'_histogram.png'))
+    plt.plot()
+    plt.close()
