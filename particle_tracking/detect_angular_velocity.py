@@ -5,6 +5,7 @@ Created on Sat May  2 19:56:44 2020
 @author: malopez
 """
 import cv2
+import os
 import pims
 import glob
 import multiprocessing as mp
@@ -20,7 +21,6 @@ from utils import printp, createCircularMask, maskImage, angle_from_2D_points
 
 
 def get_radial_brightness_peaks(video_path, row, min_r=15, max_r=20):
-# ¿Usar tambien mínimos para aumentar la estadística?
     indice = int(row[0])
     frame_number = int(row[1])
     x = row[2]
@@ -47,81 +47,53 @@ def get_radial_brightness_peaks(video_path, row, min_r=15, max_r=20):
     df.sort_values('angles', inplace=True)
 
     angulos = df['angles'].values
+    new_angulos = np.append(angulos,angulos[:100]+360)
     brillo = savgol_filter(df['brightness'], window_length=21, polyorder=3)
+    new_brillo = np.append(brillo,brillo[:100])
+    
+    picos_indice, picos_altura = find_peaks(new_brillo, distance=int(len(new_brillo)/24.),width=5, prominence=5)
+    picos = new_angulos[picos_indice]
+    
+    if picos[0] == 0.: 
+        picos = np.delete(picos,0,0)
+    
+    dips_indice, dips_altura = find_peaks(-new_brillo, distance=int(len(new_brillo)/24.),width=5, prominence=5)
+    
+    dips = new_angulos[dips_indice]
+    
+    if dips[0] == 0.:
+        dips = np.delete(dips,0,0)
+       
+    
+    
+    return (indice, [picos, dips]) 
 
-    picos_indice, picos_altura = find_peaks(brillo, width=10, prominence=5)
-    picos = angulos[picos_indice]
 
-    fig, ax = plt.subplots(figsize=(7, 5), dpi=370)
-    plt.plot(angulos, brillo)
-    plt.scatter(angulos[picos_indice], brillo[picos_indice], c='r')
+def detect_angular_velocity(experiment_id,foldervid,folderfiles,file):
 
-    fig, ax = plt.subplots(figsize=(7, 5), dpi=370)
-    plt.imshow(frame[int(y)-40:int(y)+40, int(x)-40:int(x)+40])
-    return (indice, picos[1:12]) # Devuelvo solo los picos centrales, a veces los extremos no se detectan bien
-
-
-
-if __name__ == "__main__":
-
-    GRADOS_POR_ASPA = 360/14
-
-    folder = 'D:/'
-    files = glob.glob(folder + '*Aspas*.cine') # List with all .cine files
+    GRADOS_POR_ASPA = 360/14.
+    file = file.split('/')[-1]
+    files = glob.glob(foldervid+file) # List with all .cine files
     video_path = files[0]
-
-    experiment_id = '87387719783ab1ba0d1d2008cd1f2ac5'
-    data_file = f'D:/{experiment_id}_raw_trajectories.pkl'
-    df = pd.read_pickle(data_file, compression='xz')
+    data_file = os.path.join(folderfiles, str(experiment_id)+'_raw_trajectories_ale.pkl')
+    df = pd.read_pickle(data_file, compression='xz')#[:lengthy]
     df['indice'] = df.index
-
+    
     # Función parcial, ahora solo acepta como entrada una lista, de la forma [indice, n_frame, x, y]
     partial_get_peaks = partial(get_radial_brightness_peaks, video_path, min_r=15, max_r=20)
 
-    rows = df[['indice','frame','x','y']].values#[0:10000]
+    rows = df[['indice','frame','x','y']].values#[:lengthy]
     N = len(rows)
-
 
     # Calculamos los angulos de los picos de brillo alrededor de las partículas.
     # Usamos múltiples procesadores
     N_CORES = mp.cpu_count()
     print(f'Computing angular brightness peaks using {N_CORES} cores \n')
-    with mp.Pool(processes=12) as pool:
-        dict_indices_picos = dict(list(tqdm(pool.imap(partial_get_peaks, rows), total=N)))
+    with mp.Pool(processes=N_CORES) as pool:
+        
+        dict_indices_max_mins = dict(list(tqdm(pool.imap(partial_get_peaks, rows), total=N)))
+       
+    df['extremos'] = df['indice'].map(dict_indices_max_mins)
+    
 
-    df['picos'] = df['indice'].map(dict_indices_picos)
-
-
-    #df = df.iloc[:10000]
-    new_df = []
-    for t in set(df['track']):
-        sub = df[df['track']==t]
-        desplazamientos_picos = np.diff(sub['picos'])
-
-        angular_velocities = [np.mean(desp) for desp in desplazamientos_picos]
-        # A veces al calcular la diferencia entre picos nos saltamos uno, ej: [-20.9, 4.8 , 4.9, 4.5, 5.3, 5.7, -20.6, 5.2, 5.0, 5.6 , -21.4 , 6.2, 4.6 , 5.7, 5.1, -20.5, 5.8, 5.8, 5.2, 5.3, -20.6, 5.7]
-        # Como en estos casos nos estamos saltando un aspa hay que calcular el módulo con el angulo por aspa.
-        # El ejemplo anterior pasaría a ser: [4.8, 4.8, 5. , 4.6, 5.4, 5.7, 5.1, 5.2, 5.1, 5.6, 4.3, 6.2, 4.6, 5.8, 5.1, 5.1, 5.8, 5.9, 5.3, 5.3, 5. , 5.7]
-        signo, _ = mode(np.sign(angular_velocities))
-        angular_velocities = np.mod(angular_velocities, 360/14)
-        angular_velocities *= signo
-        sub['angular_velocity'] = [0] + list(angular_velocities)
-        new_df.append(sub)
-
-    new_df = pd.concat(new_df, axis=0)[['frame','track','x','y','angular_velocity']]
-    new_df.to_pickle(f'D:/{experiment_id}_raw_trajectories_angular.pkl', compression='xz')
-
-    plt.hist(new_df.angular_velocity, bins=100)
-
-    stds = []
-    fig, ax = plt.subplots(figsize=(7, 5), dpi=370)
-    for t in set(new_df.track):
-        s = new_df[new_df.track==t]
-        ax.plot(s.angular_velocity.values, lw=1, alpha=0.5)
-        stds.append(np.std(s.angular_velocity.values))
-
-
-# =============================================================================
-#     plt.plot(stds)
-# =============================================================================
-
+    df.to_pickle(os.path.join(folderfiles, str(experiment_id)+'_extremos_ale.pkl'), compression='xz')
