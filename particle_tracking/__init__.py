@@ -21,7 +21,7 @@ from detect_blobs import detectCirclesVideo
 from calculateVelocity import alternative_delete_short_trajectories, alternative_calculate_velocities, smoothPositions
 from utils import createCircularROI, reorder_rename_dataFrame, reset_track_indexes, present_in_folder, createRectangularROI
 from detect_brightness_maxima import detect_brightness_maxima
-from only_calculate_angular_velocity import calculate_angular_velocity
+from calculate_angular_velocity import calculate_angular_velocity
 
 
 # Diametro bola 78 px, diametro discos giratorios 79 px (78.5)
