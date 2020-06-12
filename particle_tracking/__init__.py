@@ -3,26 +3,30 @@
 Created on Mon May 13 19:04:49 2019
 
 @author: malopez
+@author: alejandro marquez seco (a-mar-se)
 """
+import sys
+#sys.path.insert(1, '/home/malopez/.local/lib/python3.6/site-packages')
 import os
 from functools import partial
-from multiprocessing import Pool
+import multiprocessing as mp
 import json
 import glob
 import hashlib
 from zipfile import ZipFile
 import trackpy as tp
 import pims
+import matplotlib.pyplot as plt
 from detect_blobs import detectCirclesVideo
-from calculateVelocity import findVelocities, alternative_delete_short_trajectories, alternative_calculate_velocities
+from calculateVelocity import alternative_delete_short_trajectories, alternative_calculate_velocities, smoothPositions
 from utils import createCircularROI, reorder_rename_dataFrame, reset_track_indexes, present_in_folder, createRectangularROI
+from detect_brightness_maxima import detect_brightness_maxima
+from calculate_angular_velocity import calculate_angular_velocity
 
 
-# =============================================================================
-# folder = 'D:/serieDensidad 24-07-2019/'
-# =============================================================================
 # Diametro bola 78 px, diametro discos giratorios 79 px (78.5)
 # ROI Bolas, camara cercana: [650, 400], R=390
+
 
 def detect_particles_and_save_data(folder, file):
     # --- EXPERIMENTAL DETAILS ---
@@ -35,23 +39,21 @@ def detect_particles_and_save_data(folder, file):
     exposure = int(1000000*vid.all_exposures[0]) #in microseconds
     n_frames = vid.image_count
     recording_time = n_frames/fps
-# =============================================================================
-#         N = int(file.split('_')[-1].split('.')[0].split('n')[-1]) # Metodo guarrero y temporal
-# =============================================================================
-    N = int(file.split('_')[-3].split('N')[-1]) # Metodo guarrero y temporal
-    power = int(file.split('_')[-2].split('p')[-1]) # Metodo guarrero y temporal
+
+    N = int(os.path.split(file)[1].split('_')[1].split('N')[1]) # Metodo guarrero y temporal
+    power = int(os.path.split(file)[1].split('_')[2].split('p')[1])
     if power>=100:
         power /= 10
 
     lights = 'luzLejana'
-    camera_distance = 0.924 #in meters (bolas, cercana 0.535)
-    pixel_ratio = 1950 #in px/meter, CAMBIARLO
+    camera_distance = 0.95 #in meters (bolas, cercana 0.535)
     particle_diameter_px = 79
     particle_diameter_m = 0.0725
+    pixel_ratio = int(particle_diameter_px/particle_diameter_m)
     particle_shape = 'rotating disk'
     system_diameter = 0.725 #in meters
     packing_fraction = N*(particle_diameter_m/system_diameter)**2
-    ROI_center = [649, 392] #in pixels
+    ROI_center = [656, 395] #in pixels
     ROI_radius = 408
     # Hashing function to asign an unique id to each experiment
     # date+time should be specific enough to tell them apart
@@ -66,15 +68,9 @@ def detect_particles_and_save_data(folder, file):
     if os.path.getsize(file) != 31976589832:
         print('Corrupted file, skipping')
         return None
-# =============================================================================
-#         if folder[:-1]+'\\'+ str(experiment_id)+'_code.zip' in glob.glob(folder + '*.zip'):
-#             print('already processed')
-#             continue
-# =============================================================================
 
 
     associated_code = os.path.join(folder, str(experiment_id)+'_code.zip')
-
     # I create a dictionary to store all this properties in a .txt file
     experiment_properties_dict = {}
     for i in ('experiment_id', 'original_file', 'date', 'shape', 'fps', 'exposure',
@@ -130,20 +126,20 @@ def detect_particles_and_save_data(folder, file):
 
 
     # --CIRCLE DETECTION--
-    print(file)
+    print('Gasta aqui')
     circles = detectCirclesVideo(file, thresh=thresh, display_intermediate_steps=False,
-                                 opening_kernel=opening_kernel)
+                                 opening_kernel=opening_kernel, ROI_center=ROI_center, ROI_radius=ROI_radius)
     # A veces se captan partículas inexistentes muy cerca de los bordes del sistema. (por brillos o reflejos)
     # Por ello hay que eliminar todo aquello cuyo centro este a menos de n pixeles del borde,
     # donde n es el radio de la partícula menos un par de pixeles. Este proceso no tiene que ver con el de la ROI, en este caso 15
-    circles = createCircularROI(circles, ROI_center, ROI_radius-15)
+    circles = createCircularROI(circles, ROI_center, ROI_radius-12)
 
     # TRAJECTORY LINKING
     traj = tp.link_df(circles, 5, memory=0)
     traj = reorder_rename_dataFrame(traj) # Always run after trackpy
 
     # VELOCITY DERIVATION
-    vels = findVelocities(traj)
+    vels = alternative_calculate_velocities(traj, n=1, use_gradient=False)
     vels = reset_track_indexes(vels) # Always run after deleting traj or calculate_vels, this fills voids
 
     #SAVING RAW DATA
@@ -169,40 +165,74 @@ def detect_particles_and_save_data(folder, file):
     roi_traj.to_pickle(os.path.join(folder, str(experiment_id)+'_roi_trajectories.pkl'), compression='xz')
     roi_vels.to_pickle(os.path.join(folder, str(experiment_id)+'_roi_velocities.pkl'), compression='xz')
     # SAVING DATA 'SANTOS' FORMAT
-    roi_vels.to_csv(os.path.join(folder, str(experiment_id)+'_pos_vel_ppp.dat'), sep='\t', header=True, index=False)
+    roi_traj.to_csv(os.path.join(folder, str(experiment_id)+'_pos_vel_ppp.dat'), sep='\t', header=True, index=False)
 
 
-
-
-    # CREATION OF REGION OF INTEREST (rectangular)
-    roi_data = createRectangularROI(circles, [250,50], 750, 600)
-    roi_traj = tp.link_df(roi_data, 5, memory=0)
-    roi_traj = reorder_rename_dataFrame(roi_traj) # Always run after trackpy
-    roi_traj = reset_track_indexes(roi_traj) # Always run after deleting traj or calculate_vels, this fills voids
-    # DERIVE VELOCITIES
-    roi_vels = alternative_calculate_velocities(roi_traj, n=1, use_gradient=False)
-    # DELETING SHORT TRAJECTORIES
-    roi_vels = alternative_delete_short_trajectories(roi_vels, minimumFrames=10)
-    roi_vels = reset_track_indexes(roi_vels) # Always run after deleting traj or calculate_vels, this fills voids
-    # roi_vels = deleteShortTrajectories(roi_vels, minimumFrames=10)
-    # SAVING DATA
-    roi_data.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_data.pkl'), compression='xz')
-    roi_traj.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_trajectories.pkl'), compression='xz')
-    roi_vels.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_velocities.pkl'), compression='xz')
-
+# =============================================================================
+#     # CREATION OF REGION OF INTEREST (rectangular)
+#     roi_data = createRectangularROI(circles, [250,50], 750, 600)
+#     roi_traj = tp.link_df(roi_data, 5, memory=0)
+#     roi_traj = reorder_rename_dataFrame(roi_traj) # Always run after trackpy
+#     roi_traj = reset_track_indexes(roi_traj) # Always run after deleting traj or calculate_vels, this fills voids
+#     # DERIVE VELOCITIES
+#     roi_vels = alternative_calculate_velocities(roi_traj, n=1, use_gradient=False)
+#     # DELETING SHORT TRAJECTORIES
+#     roi_vels = alternative_delete_short_trajectories(roi_vels, minimumFrames=10)
+#     roi_vels = reset_track_indexes(roi_vels) # Always run after deleting traj or calculate_vels, this fills voids
+#     # roi_vels = deleteShortTrajectories(roi_vels, minimumFrames=10)
+#     # SAVING DATA
+#     roi_data.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_data.pkl'), compression='xz')
+#     roi_traj.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_trajectories.pkl'), compression='xz')
+#     roi_vels.to_pickle(os.path.join(folder, str(experiment_id)+'_rect_roi_velocities.pkl'), compression='xz')
+# 
+# =============================================================================
 
 
 if __name__ == "__main__":
+    codigo = '*.cine*'
+    folder = '/mnt/beegfs/malopez/serieAspas/'
+    #folder2 = '/mnt/beegfs/alejandroms/serieAspas/'
+    N_CORES = mp.cpu_count()
+    # List with all .cine files
+    files = glob.glob(folder + codigo)
+    # Filtramos los que se saltan la convencion de nombres hasta que los renombremos
+    filtered = []
+    for f in files:
+        if 'x' not in f:
+            filtered.append(f)
+    files = filtered
 
-    folder = 'D:/'
+    # First, we will extract positions and velocities from .cine files
+    # Partial function that only accept a file as argument
+    func = partial(detect_particles_and_save_data, folder)
 
-    files = glob.glob(folder + '*Aspas*.cine') # List with all .cine files
 
-    func = partial(detect_particles_and_save_data, folder) # Partial function that only accept a file
+    print(f'Processing videos, extracting positions \n')
+    with mp.Pool(processes=N_CORES) as pool:
+        pool.map(func, files)
+    
+    # Then, from those same .cine files we calculate the angular velocity
+    # of its particles
+    for file in files:
+        vid = pims.Cine(file)
+        date = str(vid.frame_time_stamps[0][0])
+        hash_object = hashlib.md5(date.encode())
+        experiment_id = str(hash_object.hexdigest())
+        print(f'Calculating angular velocities for file: {file}, with id: {experiment_id}')
 
-    pool = Pool(processes=2)
-    pool.map(func, files)
-    pool.close()
-    pool.join()
+        data_file = os.path.join(folder, str(experiment_id)+'_raw_trajectories.pkl')
 
-    #for file in files:
+        # Detect maximums and minimums, save those to a file
+        extreme_points = detect_brightness_maxima(file, data_file)
+        extreme_points.to_pickle(os.path.join(folder, str(experiment_id)+'_extremos.pkl'), compression='xz')
+
+        # Calculate angular velocity from comparing the extremes with the previous frame
+        angular_vels = calculate_angular_velocity(extreme_points)
+        angular_vels.to_pickle(os.path.join(folder, str(experiment_id)+'_angular_vels.pkl'), compression='xz')
+
+        fig, ax = plt.subplots(figsize=(6,4), dpi=300)
+        ax.hist(angular_vels['angular_velocity'].values, bins=125)
+        plt.savefig(os.path.join(folder, str(experiment_id)+'_angles_histogram.png'), bbox_inches='tight', format='png', dpi=300)
+
+    print('Ended succesfully')
+    
