@@ -1,0 +1,6 @@
+'get_vortex_mesh.py' reads the *_roi_velocities.pkl* file and averages the velocity in a each cell of the mesh. 
+It returns csv files containing the mesh division in X and Y and the velocities Vx and Vy.
+Then it creates the chirality plot calling the script 'stream_lines.py'.
+The default mesh has 10x10 cells or divisions.
+
+If the csv have already been produced and only want to change the aspect of the plot (ranges, colormap, ...), use 'plot_streams.py'
